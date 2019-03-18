@@ -1,0 +1,7 @@
+{
+  "name": "ppt",
+  "license": "UNLICENSED:w",
+  "dependencies": {
+    "puppeteer": "^1.13.0"
+  }
+}
