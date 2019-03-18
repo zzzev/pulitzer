@@ -171,20 +171,24 @@ early on.
 
 Let's take a final look at the publish dates by category and month.
 
-```{r}
+```{r fig.asp = 1}
 data %>%
   count(category, month = month(published)) %>%
   complete(month = 1:12, category, fill = list(n = 0)) %>%
   group_by(category) %>%
   mutate(total = sum(n), p = n / total) %>%
   ggplot(aes(month, category, fill = p)) +
-    geom_tile(show.legend = FALSE) +
-    scale_fill_viridis_c() +
-    scale_x_continuous(breaks = c(1:6 * 2),
-                       labels = c("Feb", "Apr", "Jun", "Aug", "Oct", "Dec")) +
+    geom_tile() +
+    scale_fill_viridis_c(labels = scales::number_format(scale = 100, suffix = "%")) +
+    scale_x_continuous(breaks = 1:12,
+                       labels = month.abb,
+                       expand = expand_scale()) +
     theme(panel.background = element_blank(),
-          axis.ticks = element_blank()) +
-    labs(x = NULL, y = NULL)
+          axis.ticks = element_blank(),
+          legend.position = "bottom") +
+    labs(x = NULL, y = NULL,
+         title = "Pulitzer Winners by Category & Month",
+         fill = "Pulitzer Winning Articles Released in Month")
 ```
 
 This is a pretty clear view of the bias, especially when you look at that
