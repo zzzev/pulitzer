@@ -1,0 +1,201 @@
+---
+title: "Pulitzer Prize Recency Bias"
+author: "Zev Youra"
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include = FALSE}
+library(tidyverse)
+library(lubridate)
+data <- read_rds("data/winners_2000-2018.rds") %>%
+  rename(category = name) %>%
+  select(-type) %>%
+  unnest %>%
+  filter(year(published) == prize_year - 1)
+```
+
+This is a notebook looking into data about Pulitzer Prize winners.
+
+The source of this data is [the Pulitzer website](//pulitzer.org); I used
+Puppeteer to gather the data (because it was not easily scrapeable with R),
+and then cleaned it up a little in R before bringing it into this notebook.
+The data here contains information about all Pulitzer winners in Journalism
+categories, from 2000-2018 (year of prize).
+
+This is a rough, exploratory notebook, meant to help me learn about the issue
+and experiment with presentation; the graphics are not at a publishable level
+of polish.
+
+```{r}
+data %>%
+  ggplot(aes(yday(published))) +
+    geom_histogram(bins = 12) +
+    scale_x_continuous(breaks = NULL) +
+    scale_y_continuous(breaks = NULL) +
+    facet_wrap(vars(prize_year)) +
+    labs(x = "day of year", y = "# winning stories published",
+         title = "Publish Date for Pulitzer Winning Stories")
+```
+
+A few things to note about this:
+
+- counts each story published individually (can be many stories for a single 
+awarded prize, somewhat depending on category)
+- a small portion of winners do not have a publish date in the Pulitzer data,
+mostly photographs. More research could pin down an exact publish date for most
+of the ones I spot checked
+([example](https://www.pulitzer.org/winners/ryan-kelly-daily-progress))
+- filters out publish dates outside of the prize year -- every time I've
+spot-checked these, they appear to be the date of the award presentation
+
+Narrowing the data shown to instead show the median of the publish dates (and
+therefore one data point per award) does not clarify the picture much.
+
+```{r}
+data %>%
+  group_by(nid) %>%
+  summarise(published = median(published, na.rm = TRUE),
+            category = first(category),
+            prize_year = first(prize_year)) %>%
+  ggplot(aes(yday(published))) +
+    geom_histogram(bins = 12) +
+    scale_x_continuous(limits = c(0, 366)) +
+    facet_wrap(vars(prize_year)) +
+    labs(title = "Median Publish Date for Journalism Pulitzer Prize Winners",
+         x = "day of year")
+```
+
+Instead, let's look by category:
+
+```{r}
+data %>%
+  filter(category != "Editorial Cartooning") %>%
+  ggplot(aes(x = yday(published), prize_year, color = prize_year)) +
+    geom_jitter(width = 0, alpha = 0.5) +
+    facet_wrap(vars(category)) +
+    scale_x_continuous(breaks = NULL) +
+    scale_y_continuous(breaks = NULL, trans = "reverse") +
+    scale_color_continuous(trans = "reverse", high = "#132B43", low = "#56B1F7",
+                           breaks = c(2000, 2010, 2018)) +
+    labs(title = "Publish Dates for Journalism Pulitzers by Category",
+         x = "day of year", color = "year", y = NULL)
+```
+
+This shows some clearer patterns. First, "Breaking News" reporting happens in
+small, intense bursts, around a particular event, which can happen at any time
+of the year. To my eye, though, the Explanatory, International, Investigative,
+National, and Public Service categories all appear to have some recency bias,
+where winning stories tend to come out towards the end of the year. This bias
+also appears to be increasing, especially over the last ~5 years.
+
+Other categories, like Beat, Commentary, Criticism, Editorial, Features, and
+Local, have less of an apparent pattern, with datapoints spread across the year.
+
+Let's see if we can illustrate this more clearly.
+
+```{r fig.width=10}
+cumulative_data <- data %>%
+  filter(category != "Editorial Cartooning") %>%
+  group_by(category, prize_year) %>%
+  mutate(day = yday(published)) %>%
+  count(day) %>%
+  complete(day = 1:366, fill = list(n = 0)) %>%
+  mutate(n = cumsum(n), max = max(n), p = n / max) %>%
+  ungroup %>%
+  mutate(category = str_remove(category, "Reporting|Writing") %>% str_trim)
+cumulative_data %>%
+  filter(prize_year >= 2010) %>%
+  ggplot(aes(day, p)) +
+    geom_line() +
+    scale_x_continuous(breaks = NULL) +
+    scale_y_continuous(breaks = NULL) +
+    facet_grid(rows = vars(prize_year),
+               cols = vars(category)) +
+    labs(title = "Publish Dates of Journalism Pulitzer Winners",
+         subtitle = "By Category & Year",
+         y = NULL, x = NULL)
+```
+
+This is pretty interesting, but kind of hard to read. Worth trying overlaying
+them by year to attempt to simplify it and make the day of year axis read
+more easily.
+
+```{r fig.asp = 1.5}
+cumulative_data %>%
+  ggplot(aes(day, p)) +
+    geom_line(aes(group = prize_year, color = prize_year), alpha = 0.8) +
+    scale_x_continuous(breaks = NULL) +
+    scale_y_continuous(breaks = NULL) +
+    facet_grid(rows = vars(category)) +
+    labs(title = "Publish Dates of Journalism Pulitzer Winners by Category",
+         y = "% of Winning Articles Published", x = "Day of Year")
+```
+
+This is easier to read, but still not very clarifying.
+
+Let's try one last approach: when were >50% of winning stories published, per
+category, per year? This is similar to the median chart earlier in this
+notebook, but split by category.
+
+```{r}
+cumulative_data %>%
+  group_by(category, prize_year) %>%
+  filter(p >= 0.5) %>%
+  summarise(day = min(day)) %>%
+  group_by(category) %>%
+  mutate(category_median = median(day)) %>%
+  ungroup() %>%
+  ggplot(aes(x = fct_reorder(category, category_median), y = prize_year, fill = day)) +
+    geom_tile() +
+    scale_y_continuous(trans = "reverse") +
+    scale_fill_viridis_c(breaks = c(60, 152, 244, 335),
+                         labels = c("Mar", "June", "Sep", "Dec"),
+                         begin = 1, end = 0, trans = "reverse") +
+    labs(x = NULL, y = NULL, title = "Median Publish Date for Pulitzer Winners",
+         subtitle = "By Category & Year", fill = "Median\npublish\ndate") +
+    theme(axis.text.x = element_text(angle = 35, hjust = 1))
+```
+
+This is additional evidence towards the hypothesis raised before: some
+categories, especially those towards the right of the chart, do appear to have a
+pretty consistent pattern of publishing late in the year. In general, there's a
+lot more green and yellow on this chart than purple, which speaks to an overall
+recency bias.
+
+However, there's not quite as obvious a tendency as I initially expected.
+There's a lot of variance between categories, and even categories that tend
+towards late publishing like Investigative have years where they were published
+early on.
+
+Let's take a final look at the publish dates by category and month.
+
+```{r}
+data %>%
+  count(category, month = month(published)) %>%
+  complete(month = 1:12, category, fill = list(n = 0)) %>%
+  group_by(category) %>%
+  mutate(total = sum(n), p = n / total) %>%
+  ggplot(aes(month, category, fill = p)) +
+    geom_tile(show.legend = FALSE) +
+    scale_fill_viridis_c() +
+    scale_x_continuous(breaks = c(1:6 * 2),
+                       labels = c("Feb", "Apr", "Jun", "Aug", "Oct", "Dec")) +
+    theme(panel.background = element_blank(),
+          axis.ticks = element_blank()) +
+    labs(x = NULL, y = NULL)
+```
+
+This is a pretty clear view of the bias, especially when you look at that
+December column. However, this view also is a bit distorted, as the number of
+stories that win in each category per year is different. This could be mitigated
+with some additional weighting, but that's enough for now.
+
+All in all, an interesting dataset, but this is just a quick look at it.
+Interesting follow-ups might include:
+
+- per-publication tendencies
+- non-journalism categories
+- comparison to other prizes
+- filling out missing data points manually
